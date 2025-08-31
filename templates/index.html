@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>HoneyDrip – Trading Dashboard</title>
+<style>
+        .chip{display:inline-block;padding:6px 10px;border:1px solid #444;border-radius:14px;margin-right:6px;cursor:pointer}
+        .chip.active{background:#111;border-color:#666}
+        table.compact td, table.compact th{padding:4px 6px;font-size:12px}
+        
+  :root{--bg:#0b0e13;--card:#151b23;--muted:#8a97a5;--ok:#20c997;--bad:#ff6b6b;--fg:#f0f3f6;--accent:#ffd166;}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+  .wrap{max-width:1200px;margin:0 auto;padding:18px}
+  .grid{display:grid;gap:16px}
+  .g-2{grid-template-columns:2fr 1fr}
+  .card{background:var(--card);border:1px solid #1f2630;border-radius:10px;padding:14px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .h{font-weight:700}
+  .muted{color:var(--muted)}
+  .pill{padding:4px 8px;border-radius:999px;border:1px solid #2a3340;background:#11161d}
+  .status{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%;background:#444}
+  .ok{background:var(--ok)} .bad{background:var(--bad)}
+  .btn{cursor:pointer;border:1px solid #29313c;background:#0f141b;color:var(--fg);border-radius:8px;padding:8px 10px}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn-warn{border-color:#6e2c2c;background:#2a1212}
+  .toggle{display:inline-flex;align-items:center;gap:8px}
+  .table{width:100%;border-collapse:collapse}
+  .table th,.table td{padding:8px;border-bottom:1px solid #222b36;text-align:left}
+  .scroll{max-height:60vh;overflow:auto}
+  details summary{cursor:pointer}
+  .spark{width:100%;height:80px;background:#0f141b;border:1px solid #1f2630}
+  code.k{background:#0f141b;border:1px solid #1f2630;padding:2px 6px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap grid g-2">
+  <!-- LEFT: Quotes + Orders + Positions + Manual tickets -->
+  <div class="grid" style="gap:16px">
+
+    <!-- Top bar: brand, mode toggle, status lights -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <div class="h" style="font-size:18px">HoneyDrip Network — Trader</div>
+          <div class="pill">Primary: <span id="primarySymbols" class="muted"><span class="chip" id="chip-SPY">SPY</span>, <span class="chip" id="chip-QQQ">QQQ</span>, <span class="chip" id="chip-SPX">SPX</span></span></div>
+        </div>
+        <div class="row">
+          <div class="toggle">
+            <span class="muted">Mode:</span>
+            <select id="modeSelect" class="btn">
+              <option value="paper">Paper</option>
+              <option value="live">Live</option>
+            </select>
+            <button id="applyMode" class="btn btn-warn">Apply</button>
+          </div>
+          <div class="pill status"><span class="dot" id="st_tradier"></span>Tradier</div>
+          <div class="pill status"><span class="dot" id="st_uw"></span>UW</div>
+          <div class="pill status"><span class="dot" id="st_openai"></span>OpenAI</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div id="quotesBox" class="pill" style="white-space:nowrap;overflow:auto;max-width:100%;">Loading quotes…</div>
+      </div>
+    </div>
+
+    <!-- Orders (dominant) -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="h">Orders</div>
+        <button id="refreshOrders" class="btn">Refresh</button>
+      </div>
+      <div id="ordersBox" class="scroll">
+        <table class="table" id="ordersTable">
+          <thead><tr><th>ID</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Type</th><th>Price</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Positions -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="h">Positions</div>
+        <button id="refreshPos" class="btn">Refresh</button>
+      </div>
+      <div id="posBox" class="scroll">
+        <table class="table" id="posTable">
+          <thead><tr><th>Symbol</th><th>Qty</th><th>Cost</th><th>Close</th><th>Mkt Value</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Manual tickets (bottom, collapsible, single copies) -->
+    <div class="card">
+      <details id="manualPanel">
+        <summary class="h">Manual Tickets (rarely used)</summary>
+        <div style="margin-top:10px" class="grid">
+          <!-- Single-leg -->
+          <div class="card">
+            <div class="h">Single-leg Option</div>
+            <div class="row" style="margin-top:8px">
+              <input id="ml_under" placeholder="Underlying e.g. SPY" class="btn" style="width:160px">
+              <input id="ml_opt" placeholder="Option symbol e.g. SPY250905C00500000" class="btn" style="width:320px">
+              <select id="ml_side" class="btn"><option>buy_to_open</option><option>sell_to_close</option></select>
+              <input id="ml_qty" type="number" min="1" value="1" class="btn" style="width:90px">
+              <select id="ml_type" class="btn"><option>limit</option><option>market</option></select>
+              <input id="ml_price" placeholder="limit price" class="btn" style="width:120px">
+              <button id="ml_send" class="btn">Send</button>
+            </div>
+            <div class="muted" style="margin-top:6px">Uses current Tradier mode (Paper/Live). Paper applies instantly; Live requires confirmation.</div>
+          </div>
+
+          <!-- Vertical spread (placeholder UI, posting later when engine spreads are wired) -->
+          <div class="card">
+            <div class="h">Vertical Spread (beta)</div>
+            <div class="muted" style="margin-top:6px">Coming next: automatic debit/credit vertical placement with width controls.</div>
+          </div>
+        </div>
+      </details>
+    </div>
+
+  </div>
+
+  <!-- RIGHT: Analytics -->
+  <div class="grid" style="gap:16px">
+    <div class="card">
+      <div class="h">Analytics</div>
+      <div class="row" style="margin-top:8px;gap:20px">
+        <div><div class="muted">Win rate</div><div id="anWr" class="h" style="font-size:22px">—</div></div>
+        <div><div class="muted">Expectancy (R)</div><div id="anEx" class="h" style="font-size:22px">—</div></div>
+        <div><div class="muted">Orders / Trades</div><div id="anCt" class="h" style="font-size:18px">—</div></div>
+      </div>
+      <div style="margin-top:10px">
+        <div class="muted">Equity (last 200)</div>
+        <svg id="anEq" class="spark" viewBox="0 0 300 80" preserveAspectRatio="none"><polyline fill="none" stroke="currentColor" stroke-width="1" points=""></polyline></svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ------- helpers
+const $ = sel => document.querySelector(sel);
+const fmt = v => v==null?'':(typeof v==='number'?v.toFixed(2):v);
+
+// ------- status lights heartbeat
+async function loadStatus(){
+  try{
+    const r = await fetch('/status', {credentials:'include'});
+    const j = await r.json();
+    $('#st_tradier').className = 'dot ' + (j?.providers?.tradier?.ok ? 'ok':'bad');
+    $('#st_uw').className = 'dot ' + (j?.providers?.uw?.ok ? 'ok':'bad');
+    $('#st_openai').className = 'dot ' + (j?.providers?.openai?.ok ? 'ok':'bad');
+  }catch(e){
+    $('#st_tradier').className='dot bad'; $('#st_uw').className='dot bad'; $('#st_openai').className='dot bad';
+  }
+}
+
+// ------- mode read + apply
+async function getMode(){
+  const r = await fetch('/api/mode', {credentials:'include'});
+  const j = await r.json();
+  $('#modeSelect').value = j.mode || 'paper';
+  $('#primarySymbols').textContent = (j.symbols||['SPY','QQQ','SPX']).join(', ');
+}
+async function applyMode(){
+  const want = $('#modeSelect').value;
+  if(want==='live'){
+    const conf = prompt('Type LIVE to confirm enabling **REAL** trading mode:');
+    if(conf!=='LIVE'){ alert('Live mode not confirmed. Staying in paper.'); $('#modeSelect').value='paper'; return; }
+  }
+  const r = await fetch('/api/mode', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mode: want, confirm: want==='live'?'LIVE':undefined})
+  });
+  const j = await r.json();
+  if(!j.ok){ alert('Failed to set mode: '+(j.error||'unknown')); }
+  else{
+    alert('Mode set to '+j.mode+(j.restarted?'\nServices restarted.':'\nPlease restart services if needed.'));
+    await getMode(); await loadOrders(); await loadPositions(); await refreshQuotes();
+  }
+}
+$('#applyMode').addEventListener('click', applyMode);
+
+// ------- quotes
+const prim = (document.getElementById('primarySymbols')?.textContent||'SPY,QQQ,SPX').split(/\s*,\s*/);
+async function refreshQuotes(){
+  try{
+    const r = await fetch('/api/quotes?symbols='+encodeURIComponent(prim.join(',')), {credentials:'include'});
+    const j = await r.json();
+    const q = j?.quotes?.quote;
+    let arr = Array.isArray(q)?q:(q?[q]:[]);
+    if(!arr.length){ $('#quotesBox').textContent='No quotes'; return; }
+    $('#quotesBox').innerHTML = arr.map(o=>{
+      const last = o.last ?? o.last_trade ?? o.close;
+      const ch = o.change ?? 0;
+      return `<span class="pill">${o.symbol}: <b>${fmt(last)}</b> <span class="${ch>=0?'ok':'bad'}">${fmt(ch)}</span></span>`;
+    }).join(' ');
+  }catch(e){ $('#quotesBox').textContent='Quotes error'; }
+}
+
+// ------- orders
+async function loadOrders(){
+  const r = await fetch('/api/orders', {credentials:'include'});
+  const j = await r.json();
+  const rows = j?.orders || [];
+  const tb = $('#ordersTable tbody'); tb.innerHTML='';
+  rows.forEach(o=>{
+    const id = o.id ?? o.order_id ?? '';
+    const sym = o.symbol ?? '';
+    const side= o.side ?? '';
+    const qty = o.quantity ?? '';
+    const typ = o.type ?? '';
+    const prc = o.price ?? o.avg_fill_price ?? '';
+    const st  = o.status ?? '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${id}</td><td>${sym}</td><td>${side}</td><td>${qty}</td><td>${typ}</td><td>${prc}</td><td>${st}</td>
+      <td>${id?`<button class="btn btn-warn" data-cancel="${id}">Cancel</button>`:''}</td>`;
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('button[data-cancel]').forEach(b=>{
+    b.onclick = async ()=>{
+      if(!confirm('Cancel order '+b.dataset.cancel+'?')) return;
+      const r = await fetch('/api/orders/cancel?id='+encodeURIComponent(b.dataset.cancel), {method:'POST', credentials:'include'});
+      await loadOrders();
+    };
+  });
+}
+$('#refreshOrders').addEventListener('click', loadOrders);
+
+// ------- positions
+async function loadPositions(){
+  const r = await fetch('/api/positions', {credentials:'include'});
+  const j = await r.json();
+  const rows = j?.positions || [];
+  const tb = $('#posTable tbody'); tb.innerHTML='';
+  rows.forEach(p=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${p.symbol||''}</td><td>${p.quantity||''}</td><td>${p.cost_basis||''}</td><td>${p.close_price||''}</td><td>${p.market_value||''}</td>`;
+    tb.appendChild(tr);
+  });
+}
+$('#refreshPos').addEventListener('click', loadPositions);
+
+// ------- analytics
+async function loadAnalytics(){
+  try{
+    const r = await fetch('/api/analytics/summary', {credentials:'include'});
+    const j = await r.json();
+    if(j.win_rate_pct!=null) $('#anWr').textContent = j.win_rate_pct.toFixed(1)+'%';
+    if(j.expectancy_r!=null) $('#anEx').textContent = j.expectancy_r.toFixed(2);
+    if(j.counts) $('#anCt').textContent = `${j.counts.orders} / ${j.counts.trades}`;
+    const pts = (j.equity_series||[]).map(e=>e.equity).filter(x=>typeof x==='number');
+    const svg = $('#anEq'); const pl = svg.querySelector('polyline');
+    if(pts.length>1){
+      const w=300,h=80, min=Math.min(...pts), max=Math.max(...pts), rng=(max-min)||1;
+      const coords = pts.map((v,i)=>`${(i/(pts.length-1)*w).toFixed(1)},${(h-((v-min)/rng)*h).toFixed(1)}`).join(' ');
+      pl.setAttribute('points', coords);
+    } else { pl.setAttribute('points',''); }
+  }catch(e){}
+}
+
+// ------- manual single-leg sender (uses current mode)
+$('#ml_send').addEventListener('click', async ()=>{
+  const data = {
+    underlying: $('#ml_under').value.trim(),
+    option_symbol: $('#ml_opt').value.trim(),
+    side: $('#ml_side').value,
+    quantity: parseInt($('#ml_qty').value||'1',10),
+    type: $('#ml_type').value,
+    price: $('#ml_type').value==='limit' ? $('#ml_price').value : undefined
+  };
+  if(!data.underlying || !data.option_symbol){ alert('Fill underlying & option symbol'); return; }
+  if(!confirm('Submit order in CURRENT MODE?')) return;
+  const r = await fetch('/api/manual/order', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data), credentials:'include'});
+  const j = await r.json();
+  if(!j.ok){ alert('Order error: '+(j.error||'unknown')); }
+  await loadOrders();
+});
+
+// ------- boot
+(async ()=>{
+  await getMode();
+  await loadStatus(); setInterval(loadStatus, 10000);
+  await refreshQuotes(); setInterval(refreshQuotes, 15000);
+  await loadOrders(); setInterval(loadOrders, 20000);
+  await loadPositions(); setInterval(loadPositions, 25000);
+  await loadAnalytics(); setInterval(loadAnalytics, 30000);
+})();
+
+// HDN-ORDERS-V2
+const ordersTable = document.getElementById('ordersTable');
+const refreshBtn = document.getElementById('refreshOrders');
+
+async function loadOrders(){
+  if (refreshBtn){ refreshBtn.disabled = true; refreshBtn.textContent = 'Refreshing…'; }
+  try{
+    const r = await fetch('/api/orders', {credentials:'include'});
+    const j = await r.json();
+    const rows = j?.orders || [];
+    const tb = ordersTable.querySelector('tbody');
+    tb.innerHTML = '';
+    rows.forEach(o=>{
+      const id = o.id ?? o.order_id ?? '';
+      const sym = o.symbol ?? '';
+      const side= o.side ?? '';
+      const qty = o.quantity ?? '';
+      const typ = o.type ?? '';
+      const prc = o.price ?? o.avg_fill_price ?? '';
+      const st  = o.status ?? '';
+      const tr = document.createElement('tr');
+      tr.dataset.orderId = id;
+      tr.innerHTML = `<td>${id}</td><td>${sym}</td><td>${side}</td><td>${qty}</td><td>${typ}</td><td>${prc}</td><td>${st}</td>
+        <td>${id?`<button class="btn btn-warn" data-cancel="${id}">Cancel</button>`:''}</td>`;
+      tb.appendChild(tr);
+    });
+  }catch(e){
+    // show a small error row
+    const tb = ordersTable.querySelector('tbody');
+    tb.innerHTML = `<tr><td colspan="8" class="muted">Orders error</td></tr>`;
+  }finally{
+    if (refreshBtn){ refreshBtn.disabled = false; refreshBtn.textContent = 'Refresh'; }
+  }
+}
+
+// Event delegation for cancel buttons (works after each refresh)
+ordersTable.addEventListener('click', async (ev)=>{
+  const btn = ev.target.closest('button[data-cancel]');
+  if(!btn) return;
+  const id = btn.dataset.cancel;
+  if(!id) return;
+  if(!confirm('Cancel order '+id+'?')) return;
+  btn.disabled = true; btn.textContent = 'Cancelling…';
+  try{
+    const r = await fetch('/api/orders/cancel?id='+encodeURIComponent(id), {method:'POST', credentials:'include'});
+    const j = await r.json();
+    if(j && j.ok){
+      // Remove row immediately
+      const tr = btn.closest('tr');
+      if (tr) tr.remove();
+    }else{
+      alert('Cancel failed: '+(j?.resp?.errors?.error?.message || j?.error || 'unknown'));
+      btn.disabled = false; btn.textContent = 'Cancel';
+    }
+  }catch(e){
+    alert('Cancel error'); btn.disabled = false; btn.textContent = 'Cancel';
+  }
+});
+
+// Wire the refresh button
+if (refreshBtn){ refreshBtn.addEventListener('click', loadOrders); }
+
+
+// ---------- Clickable tickers -> expirations + chain ----------
+async function loadExpirations(sym){
+  const r = await authFetch(`/api/options/expirations?symbol=${encodeURIComponent(sym)}`);
+  const sel = document.getElementById('expirations');
+  sel.innerHTML = '';
+  (r.expirations||[]).forEach(d=>{
+    const o=document.createElement('option'); o.value=d; o.textContent=d; sel.appendChild(o);
+  });
+}
+async function loadChain(sym, exp){
+  const r = await authFetch(`/api/options/chain2?symbol=${encodeURIComponent(sym)}&expiration=${encodeURIComponent(exp)}`);
+  const ct = document.getElementById('chain-table');
+  const rows = (r.contracts||[]).slice(0,200);
+  let html = '<table class="compact" width="100%"><thead><tr><th>Type</th><th>Strike</th><th>Bid</th><th>Ask</th><th>Last</th><th>Vol</th><th>OI</th></tr></thead><tbody>';
+  for(const c of rows){
+    html += `<tr><td>${c.option_type||''}</td><td>${c.strike||''}</td><td>${c.bid??''}</td><td>${c.ask??''}</td><td>${c.last??''}</td><td>${c.volume??''}</td><td>${c.open_interest??''}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  ct.innerHTML = html;
+}
+function setActiveChip(sym){
+  document.querySelectorAll('.chip').forEach(el=>el.classList.remove('active'));
+  const el = document.getElementById(`chip-${sym}`);
+  if(el) el.classList.add('active');
+  document.getElementById('selected-symbol').textContent = sym;
+}
+async function onChipClick(sym){
+  setActiveChip(sym);
+  await loadExpirations(sym);
+  const sel = document.getElementById('expirations');
+  if(sel.value) await loadChain(sym, sel.value);
+}
+// Wire load button
+document.addEventListener('click', async (e)=>{
+  if(e.target && e.target.id==='load-chain'){
+    const sym = document.getElementById('selected-symbol').textContent.trim();
+    const exp = document.getElementById('expirations').value;
+    if(exp) loadChain(sym, exp);
+  }
+});
+// Initialize with SPY after page loads
+window.addEventListener('load', async ()=>{
+  await loadExpirations('SPY');
+});
+
+// Make the main quotes chips clickable (assumes elements exist)
+function wireChips(){
+  ['SPY','QQQ','SPX'].forEach(sym=>{
+    const el = document.getElementById(`chip-${sym}`);
+    if(el){ el.style.cursor='pointer'; el.onclick=()=>onChipClick(sym); }
+  });
+}
+setTimeout(wireChips, 500);
+
+// ---------- UW Flow panel ----------
+async function refreshUW(){
+  const sym = document.getElementById('uw-symbol').value;
+  const r = await authFetch(`/api/uw/flow?symbol=${encodeURIComponent(sym)}&limit=30`);
+  const rows = r.rows||[];
+  let html = '<table class="compact" width="100%"><thead><tr><th>Time</th><th>Ticker</th><th>Side</th><th>Exp</th><th>Strike</th><th>Notional</th><th>AskHit</th></tr></thead><tbody>';
+  for(const x of rows){
+    html += `<tr><td>${x.ts||''}</td><td>${x.ticker||''}</td><td>${x.side||''}</td><td>${x.exp||''}</td><td>${x.strike||''}</td><td>${x.notional||''}</td><td>${x.ask_hit?'✓':''}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('uw-rows').innerHTML = html;
+}
+document.getElementById('uw-refresh').onclick = refreshUW;
+setInterval(()=>{ try{ refreshUW(); }catch(e){} }, 10000);
+        </script>
+        
+</body>
+</html>

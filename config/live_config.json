@@ -1,0 +1,12 @@
+{
+  "max_risk_pct": 0.5,
+  "safety_max_contracts": 3,
+  "allow_runners": true,
+  "enable_spreads": true,
+  "coach_mode": true,
+  "primary_symbols": [
+    "SPY",
+    "QQQ",
+    "SPX"
+  ]
+}
